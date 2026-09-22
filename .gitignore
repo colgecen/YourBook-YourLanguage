@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Input / Output PDF'leri (Repo şişmesin)
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+
+# Checkpoint / cache
+*.checkpoint.json
+*.cache.json
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
