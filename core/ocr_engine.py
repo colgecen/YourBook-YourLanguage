@@ -56,13 +56,20 @@ class OCREngine:
             PIL.Image nesnelerinin listesi.
         """
         first = max(1, start_page)
-        last = end_page if end_page is not None else 10**9
-        return convert_from_path(
-            str(pdf_path),
-            dpi=self.dpi,
-            first_page=first,
-            last_page=last,
-        )
+        kwargs: dict = {"dpi": self.dpi, "first_page": first}
+        # last_page verilmezse pdf2image belgenin sonuna kadar gider.
+        # Eskiden 10**9 gonderiliyordu, poppler'da hata veriyordu.
+        if end_page is not None:
+            kwargs["last_page"] = max(first, end_page)
+        try:
+            return convert_from_path(str(pdf_path), **kwargs)
+        except Exception as exc:
+            raise RuntimeError(
+                "pdf2image donusumu basarisiz. Poppler kurulu olmali: "
+                "Windows'ta poppler'i kurup PATH'e ekleyin, "
+                "Linux'ta 'sudo apt install poppler-utils'. "
+                f"Orijinal hata: {exc}"
+            ) from exc
 
     def extract_blocks(self, image: Image.Image) -> list[TextBlock]:
         """Tek bir sayfa görselinden metin bloklarını çıkarır.

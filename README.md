@@ -11,10 +11,10 @@ Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sa
 
 ## 🛠️ Kurulum
 
-1. **Sistem Gereksinimi (Tesseract OCR Engine):**
-   - **Windows:** [Tesseract-OCR installer](https://github.com/UB-Mannheim/tesseract/wiki) indirip kurun. `tesseract.exe` yolunu sistem PATH'ine ekleyin.
-   - **Linux:** `sudo apt install tesseract-ocr tesseract-ocr-tur tesseract-ocr-eng`
-   - **macOS:** `brew install tesseract tesseract-lang`
+1. **Sistem Gereksinimi (Tesseract + Poppler):**
+   - **Windows:** [Tesseract-OCR installer](https://github.com/UB-Mannheim/tesseract/wiki) indirip kurun. `tesseract.exe` yolunu sistem PATH'ine ekleyin. Ayrica [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) indirip `bin/` klasorunu PATH'e ekleyin (pdf2image icin sart).
+   - **Linux:** `sudo apt install tesseract-ocr tesseract-ocr-tur tesseract-ocr-eng poppler-utils`
+   - **macOS:** `brew install tesseract tesseract-lang poppler`
 
 2. **Bağımlılıkları Yükleyin:**
    ```bash

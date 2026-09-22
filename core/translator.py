@@ -75,6 +75,8 @@ class ParagraphTranslator:
         target: str = "tr",
         cache_path: str | Path = ".cache/translations.db",
         delay: float = 1.0,
+        max_retries: int = 3,
+        max_chunk: int = 4000,
     ) -> None:
         """Cevirmeni yapilandirir.
 
@@ -83,15 +85,32 @@ class ParagraphTranslator:
             target: Hedef dil kodu.
             cache_path: SQLite cache dosya yolu.
             delay: Istekler arasindaki gecikme (saniye).
+            max_retries: Ag hatasinda tekrar sayisi.
+            max_chunk: Google Translate limiti icin paragraf parcasi (~5000).
         """
         self.source = source
         self.target = target
         self.delay = delay
+        self.max_retries = max_retries
+        self.max_chunk = max_chunk
         self._translator = GoogleTranslator(source=source, target=target)
         self.cache = TranslationCache(cache_path)
 
+    def _translate_chunk(self, text: str) -> str:
+        """Tek istekte cevrilir; rate-limit/ag hatasinda retry yapar."""
+        last_err: Exception | None = None
+        for attempt in range(max(1, self.max_retries)):
+            try:
+                return self._translator.translate(text) or ""
+            except Exception as exc:  # noqa: BLE001 - ag hatasi tum isi devirmesin
+                last_err = exc
+                time.sleep(self.delay * (attempt + 1))
+        raise RuntimeError(f"Ceviri basarisiz ({self.max_retries} deneme): {last_err}") from last_err
+
     def translate_paragraph(self, text: str) -> str:
         """Tek bir paragrafi cevirir; onbellekte varsa aga cikmaz.
+
+        Uzun paragraflar max_chunk ile bolunur (Google ~5000 karakter limiti).
 
         Args:
             text: Kaynak paragraf.
@@ -105,7 +124,14 @@ class ParagraphTranslator:
         hit = self.cache.get(cleaned)
         if hit is not None:
             return hit
-        result = self._translator.translate(cleaned) or ""
+        if len(cleaned) > self.max_chunk:
+            parts = [
+                cleaned[i : i + self.max_chunk]
+                for i in range(0, len(cleaned), self.max_chunk)
+            ]
+            result = " ".join(self._translate_chunk(p) for p in parts)
+        else:
+            result = self._translate_chunk(cleaned)
         self.cache.put(cleaned, result)
         if self.delay > 0:
             time.sleep(self.delay)
