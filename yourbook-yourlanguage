@@ -1,0 +1,414 @@
+#!/usr/bin/env bash
+#
+# yourbook-yourlanguage - run and build tool
+#
+#   ./yourbook-yourlanguage              Run the app from source.
+#   ./yourbook-yourlanguage --install    Install the command, launcher entry and icon.
+#   ./yourbook-yourlanguage --uninstall  Remove them.
+#   ./yourbook-yourlanguage --build      Interactive build menu.
+#   ./yourbook-yourlanguage --build --list
+#   ./yourbook-yourlanguage --build linux <format> [arch]
+#
+# Formats: appimage | targz | rpm | source | all
+# Archs:   x86_64 | aarch64 | all (default: all)
+#
+set -euo pipefail
+
+# ---- per-project settings ----
+APP="yourbook-yourlanguage"
+BIN="yourbook-yourlanguage"
+SUMMARY="Translate scanned English book PDFs into Turkish with layout-preserving typesetting"
+LICENSE_ID="MIT"
+WINDOWS_SUPPORTED="no"
+ICON="assets/icon.png"
+ICON_RADIUS_PCT="20"
+VERSION="${VERSION:-0.1.0}"
+ARCHS_DEFAULT="x86_64 aarch64"
+
+# ---- repository root ----
+resolve_root() {
+  local src="${BASH_SOURCE[0]}"
+  while [ -L "$src" ]; do
+    local dir
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+ROOT="$(resolve_root)"
+DIST="$ROOT/build/dist"
+STAGE="$ROOT/build/.stage"
+CACHE="$ROOT/build/.cache"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+banner() {
+  echo "=============================================="
+  echo "  $APP build tool  v$VERSION"
+  echo "=============================================="
+}
+
+# =====================================================================
+# Runtime and run mode
+# =====================================================================
+venv_dir() {
+  if [ -w "$ROOT" ]; then
+    echo "$ROOT/.venv"
+  else
+    echo "${XDG_DATA_HOME:-$HOME/.local/share}/$APP/venv"
+  fi
+}
+
+ensure_runtime() {
+  VENV="$(venv_dir)"
+  if [ ! -x "$VENV/bin/python" ]; then
+    echo "==> Creating Python environment: $VENV"
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --upgrade pip >/dev/null
+    "$VENV/bin/pip" install -r "$ROOT/requirements.txt"
+  fi
+}
+
+run_app() {
+  ensure_runtime
+  if [ -x "$ROOT/.tools/tesseract/tesseract" ]; then
+    export PATH="$ROOT/.tools/tesseract:$PATH"
+    export TESSDATA_PREFIX="$ROOT/.tools/tesseract/tessdata"
+  fi
+  exec "$VENV/bin/python" "$ROOT/gui.py" "$@"
+}
+
+# =====================================================================
+# Install / uninstall
+# =====================================================================
+WRAPPER_MARK="# yourbook-yourlanguage-wrapper"
+DESKTOP_MARK="# yourbook-yourlanguage-desktop"
+
+prepare_icon() {
+  local src="$ROOT/$ICON" dest="$1" im="" w r corner
+  [ -f "$src" ] || return 1
+  if command -v magick >/dev/null 2>&1; then im="magick"
+  elif command -v convert >/dev/null 2>&1; then im="convert"; fi
+  if [ -z "$im" ]; then
+    echo "NOTE: ImageMagick not found, icon copied without rounding."
+    cp "$src" "$dest"; return 0
+  fi
+  w="$($im "$src" -format %w info:)"
+  r=$(( w * ICON_RADIUS_PCT / 100 ))
+  opaque="$($im "$src" -format '%[opaque]' info: 2>/dev/null || echo True)"
+  if [ "$opaque" != "True" ]; then
+    # Icon already has transparent (rounded) corners; keep it unchanged.
+    cp "$src" "$dest"
+  else
+    $im "$src" -alpha set \
+      \( -size "${w}x${w}" xc:none -fill white \
+         -draw "roundrectangle 0,0 $((w-1)),$((w-1)) $r,$r" \) \
+      -compose DstIn -composite "$dest"
+  fi
+}
+
+install_desktop_entry() {
+  local apps="$HOME/.local/share/applications"
+  local icons="$HOME/.local/share/icons/hicolor/512x512/apps"
+  local iconline=""
+  mkdir -p "$apps" "$icons"
+  if prepare_icon "$icons/$APP.png"; then iconline="Icon=$APP"; fi
+  cat > "$apps/$APP.desktop" << DESKTOP
+$DESKTOP_MARK
+[Desktop Entry]
+Type=Application
+Name=YourBook YourLanguage
+Comment=$SUMMARY
+Exec="$ROOT/$APP"
+$iconline
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=KitapPdfCevirmen
+DESKTOP
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" 2>/dev/null || true
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+  echo "Installed: $apps/$APP.desktop"
+}
+
+uninstall_desktop_entry() {
+  local f="$HOME/.local/share/applications/$APP.desktop"
+  if [ -f "$f" ] && grep -q "$DESKTOP_MARK" "$f"; then
+    rm -f "$f" "$HOME/.local/share/icons/hicolor/512x512/apps/$APP.png"
+    echo "Removed: $f"
+  fi
+}
+
+do_install() {
+  local bindir="$HOME/.local/bin"
+  ensure_runtime
+  if ! python3 -c 'import tkinter' 2>/dev/null; then
+    echo "NOTE: python3-tkinter is required for the GUI."
+  fi
+  mkdir -p "$bindir"
+  printf '#!/usr/bin/env bash\n%s\nexec "%s/%s" --build "$@"\n' \
+    "$WRAPPER_MARK" "$ROOT" "$APP" > "$bindir/$APP"
+  chmod +x "$bindir/$APP"
+  install_desktop_entry
+  echo "Installed: $bindir/$APP"
+  case ":$PATH:" in
+    *":$bindir:"*) echo "Done. Type '$APP' in any folder to open the build menu." ;;
+    *)
+      echo "NOTE: $bindir is not in PATH. Add this line to ~/.bashrc:"
+      echo '  export PATH="$HOME/.local/bin:$PATH"'
+      echo "Then open a new terminal or run: source ~/.bashrc"
+      ;;
+  esac
+}
+
+do_uninstall() {
+  local f="$HOME/.local/bin/$APP"
+  if [ -f "$f" ] && grep -q "$WRAPPER_MARK" "$f"; then
+    rm -f "$f"
+    echo "Removed: $f"
+  else
+    echo "Nothing to remove."
+  fi
+  uninstall_desktop_entry
+}
+
+# =====================================================================
+# Build helpers
+# =====================================================================
+list_targets() {
+  echo "linux   : appimage | targz | rpm | source | all"
+  echo "arch    : x86_64 | aarch64 | all (default)"
+}
+
+usage() {
+  banner
+  echo
+  echo "Usage:"
+  echo "  $APP                          Interactive build menu"
+  echo "  $APP <os> <format> [arch]     Build directly"
+  echo "  $APP --list                   List targets"
+  echo
+  list_targets
+}
+
+asset() { echo "$DIST/$APP-$VERSION-linux-$1.$2"; }
+
+stage_source() {
+  local dest="$1"
+  mkdir -p "$dest"
+  ( cd "$ROOT" && tar \
+      --exclude=.git --exclude=.venv --exclude=input --exclude=output \
+      --exclude=build --exclude=.tools --exclude=.cache --exclude=__pycache__ \
+      --exclude='*.pyc' -cf - . ) | tar -C "$dest" -xf -
+}
+
+linux_source() {
+  mkdir -p "$DIST"
+  git -C "$ROOT" archive --format=tar.gz --prefix="$APP-$VERSION/" \
+    -o "$DIST/$APP-$VERSION-source.tar.gz" HEAD
+  echo "==> $DIST/$APP-$VERSION-source.tar.gz"
+}
+
+linux_targz() {
+  local arch="$1" name="$APP-$VERSION-$arch" dir out
+  dir="$STAGE/$name"
+  rm -rf "$dir"
+  mkdir -p "$dir" "$DIST"
+  stage_source "$dir"
+  out="$(asset "$arch" tar.gz)"
+  tar -C "$STAGE" -czf "$out" "$name"
+  echo "==> $out"
+}
+
+linux_rpm() {
+  local arch="$1" top="$STAGE/rpm-$arch" out
+  command -v rpmbuild >/dev/null 2>&1 || die "rpmbuild not found (sudo dnf install rpm-build)."
+  rm -rf "$top"
+  mkdir -p "$top"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} "$DIST"
+  local src="$top/SOURCES/$APP-$VERSION"
+  stage_source "$src"
+  ( cd "$top/SOURCES" && tar -czf "$APP-$VERSION.tar.gz" "$APP-$VERSION" )
+  cat > "$top/SPECS/$APP.spec" << SPEC
+%global debug_package %{nil}
+Name: $APP
+Version: $VERSION
+Release: 1
+Summary: $SUMMARY
+License: $LICENSE_ID
+BuildArch: $arch
+Source0: %{name}-%{version}.tar.gz
+Requires: python3
+Requires: python3-tkinter
+Requires: python3-pip
+Requires: tesseract
+Requires: tesseract-langpack-eng
+Requires: poppler-utils
+%description
+$SUMMARY
+%prep
+%setup -q
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}/opt/%{name}
+cp -a . %{buildroot}/opt/%{name}/
+rm -rf %{buildroot}/opt/%{name}/build
+mkdir -p %{buildroot}/usr/bin %{buildroot}/usr/share/applications
+mkdir -p %{buildroot}/usr/share/icons/hicolor/512x512/apps
+ln -s /opt/%{name}/%{name} %{buildroot}/usr/bin/%{name}
+install -m 0644 assets/icon.png %{buildroot}/usr/share/icons/hicolor/512x512/apps/%{name}.png
+cat > %{buildroot}/usr/share/applications/%{name}.desktop << DESKTOP
+[Desktop Entry]
+Type=Application
+Name=YourBook YourLanguage
+Comment=$SUMMARY
+Exec=/opt/%{name}/%{name}
+Icon=%{name}
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=KitapPdfCevirmen
+DESKTOP
+%files
+/opt/%{name}
+/usr/bin/%{name}
+/usr/share/applications/%{name}.desktop
+/usr/share/icons/hicolor/512x512/apps/%{name}.png
+SPEC
+  rpmbuild --define "_topdir $top" --target "$arch" -bb "$top/SPECS/$APP.spec" >/dev/null
+  out="$(asset "$arch" rpm)"
+  cp "$top/RPMS/$arch/"*.rpm "$out"
+  echo "==> $out"
+}
+
+fetch() {
+  local url="$1" dest="$2"
+  [ -s "$dest" ] && return 0
+  rm -f "$dest"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 180 "$url" -o "$dest" || rm -f "$dest"
+  fi
+  if [ ! -s "$dest" ] && command -v wget >/dev/null 2>&1; then
+    wget -O "$dest" "$url" || rm -f "$dest"
+  fi
+  [ -s "$dest" ] || die "Download failed: $url"
+  chmod +x "$dest"
+}
+
+linux_appimage() {
+  local arch="$1" appdir="$STAGE/$APP-$arch.AppDir" out
+  local tool runtime
+  mkdir -p "$CACHE"
+  if command -v appimagetool >/dev/null 2>&1; then
+    tool="$(command -v appimagetool)"
+  else
+    tool="$CACHE/appimagetool-$arch"
+    fetch "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage" "$tool"
+  fi
+  runtime="$CACHE/runtime-$arch"
+  fetch "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch" "$runtime"
+
+  rm -rf "$appdir"
+  mkdir -p "$appdir/usr/share" "$appdir/usr/share/applications"
+  stage_source "$appdir/usr/share/$APP"
+  cp "$ROOT/$ICON" "$appdir/$APP.png"
+  ln -sf "$APP.png" "$appdir/.DirIcon"
+
+  cat > "$appdir/AppRun" << APPRUN
+#!/bin/sh
+HERE="\$(dirname "\$(readlink -f "\$0")")"
+export APPDIR="\$HERE"
+export YOURBOOK_APPIMAGE=1
+exec "\$HERE/usr/share/$APP/$APP" "\$@"
+APPRUN
+  chmod +x "$appdir/AppRun"
+
+  cat > "$appdir/$APP.desktop" << DESKTOP
+[Desktop Entry]
+Name=$APP
+Exec=$APP
+Icon=$APP
+Terminal=false
+Type=Application
+Categories=Office;Utility;
+StartupWMClass=KitapPdfCevirmen
+DESKTOP
+  cp "$appdir/$APP.desktop" "$appdir/usr/share/applications/"
+
+  out="$(asset "$arch" AppImage)"
+  rm -f "$out"
+  ( cd "$STAGE" && "$tool" --appimage-extract >/dev/null 2>&1 || true )
+  if [ -x "$STAGE/squashfs-root/AppRun" ]; then
+    ARCH="$arch" "$STAGE/squashfs-root/AppRun" --runtime-file "$runtime" -n "$appdir" "$out"
+    rm -rf "$STAGE/squashfs-root"
+  else
+    ARCH="$arch" "$tool" --runtime-file "$runtime" -n "$appdir" "$out"
+  fi
+  echo "==> $out"
+}
+
+# =====================================================================
+# Dispatch
+# =====================================================================
+build_target() {
+  local os="$1" fmt="$2" archsel="${3:-all}" archs a f
+  mkdir -p "$STAGE" "$DIST"
+  banner
+  echo "Target: os=$os format=$fmt arch=$archsel version=$VERSION"
+  echo
+  if [ "$archsel" = "all" ]; then archs="$ARCHS_DEFAULT"; else archs="$archsel"; fi
+
+  case "$os" in
+    linux)
+      [ "$fmt" = "all" ] && fmt="appimage targz rpm source"
+      for f in $fmt; do
+        case "$f" in
+          source) linux_source ;;
+          appimage|targz|rpm) for a in $archs; do "linux_$f" "$a"; done ;;
+          *) die "Unknown linux format: $f (valid: appimage | targz | rpm | source | all)" ;;
+        esac
+      done
+      ;;
+    *) die "Unknown OS: $os (valid: linux)" ;;
+  esac
+
+  ( cd "$DIST" && rm -f SHA256SUMS && sha256sum -- * > SHA256SUMS )
+  echo
+  echo "Done. Assets are in build/dist/ (SHA256SUMS included)."
+}
+
+interactive() {
+  local os="linux" fmt
+  banner
+  echo
+  echo "Select package format:"
+  select c in "All (AppImage, tar.gz, rpm, source)" "AppImage" "tar.gz" "rpm" "Source code" "Cancel"; do
+    case "$REPLY" in
+      1) fmt="all"; break ;;
+      2) fmt="appimage"; break ;;
+      3) fmt="targz"; break ;;
+      4) fmt="rpm"; break ;;
+      5) fmt="source"; break ;;
+      6|"") echo "Cancelled."; exit 0 ;;
+      *) echo "Invalid choice." ;;
+    esac
+  done
+  build_target "$os" "$fmt" all
+}
+
+build_main() {
+  case "${1:-}" in
+    "") interactive ;;
+    -h|--help|help) usage ;;
+    -l|--list|list) list_targets ;;
+    linux)
+      [ $# -ge 2 ] || { echo "Format missing."; list_targets; exit 1; }
+      build_target "$1" "$2" "${3:-all}"
+      ;;
+    *) echo "Unknown command: $1"; echo; usage; exit 1 ;;
+  esac
+}
+
+case "${1:-}" in
+  --build)     shift; build_main "$@" ;;
+  --install)   do_install ;;
+  --uninstall) do_uninstall ;;
+  *)           run_app "$@" ;;
+esac

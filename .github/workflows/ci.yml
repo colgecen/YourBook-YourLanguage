@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng poppler-utils imagemagick rpm
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile sources
+        run: python -m compileall -q main.py gui.py core scripts
+
+      - name: Check launcher syntax
+        run: bash -n yourbook-yourlanguage
+
+      - name: Import check
+        run: |
+          python -c "from core.ocr_engine import OCREngine; from core.translator import ParagraphTranslator; print('ok')"

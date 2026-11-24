@@ -1,83 +1,53 @@
-# 📚 Book PDF Translator & Typesetter (Garamond)
+<h1 align="center">YourBook YourLanguage</h1>
 
-Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sayfa düzenini bozmadan ve yayınevi kalitesinde **Garamond** fontuyla Türkçeye çeviren ultra hafif ve %100 ücretsiz Python uygulaması.
+<p align="center">Translate scanned English book PDFs into Turkish while preserving the page layout, with local OCR and Garamond typesetting.</p>
 
-## ✨ Özellikler
-- **%100 Ücretsiz & Yerel OCR:** Google Tesseract C++ motoru ile kopyalanamayan resim yazıları okuma.
-- **Hızlı Çeviri:** `deep-translator` üzerinden Google Translate entegrasyonu + SQLite cache; Google engelliyse otomatik alternatif uç nokta.
-- **Garamond Auto-Fit Dizgi:** Türkçe metin uzamalarına karşı font boyutunu dinamik küçülterek sayfadan taşmayı önleme.
-- **Görsel Temizleme (Inpainting):** OpenCV ile arka plan dokusunu koruyarak eski İngilizce yazıları silme.
-- **Kesinti Koruması (Checkpoint):** Dev kitaplarda işlem yarıda kalırsa kaldığı sayfadan devam edebilme.
-- **Grafik Arayüz:** Tkinter tabanlı masaüstü arayüzü; dosya seçimi, ayrı kayıt klasörü ve çıktı dosya adı, canlı ilerleme, günlük ve 10 saniyede otomatik temizlenen işlem paneli.
+## Screenshots
 
-## 🛠️ Kurulum
+<p align="center">
+  <img src="docs/img/app-gui.svg" alt="YourBook YourLanguage desktop app" width="800">
+</p>
 
-1. **Sistem Gereksinimi (Tesseract + Poppler):**
-   - **Windows:** [Tesseract-OCR installer](https://github.com/UB-Mannheim/tesseract/wiki) indirip kurun. `tesseract.exe` yolunu sistem PATH'ine ekleyin. Ayrica [poppler-windows](https://github.com/oschwartz10612/poppler-windows/releases) indirip `bin/` klasorunu PATH'e ekleyin (pdf2image icin sart).
-   - **Linux:** `sudo apt install tesseract-ocr tesseract-ocr-tur tesseract-ocr-eng poppler-utils`
-   - **macOS:** `brew install tesseract tesseract-lang poppler`
+## Features
 
-2. **Bağımlılıkları Yükleyin:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+- Converts scanned or image-only English PDFs with local Tesseract OCR
+- Translates English to Turkish with a SQLite cache and an automatic fallback endpoint
+- Rebuilds each page with Garamond auto-fit typesetting and OpenCV background cleaning
+- Resumes interrupted books from a checkpoint file
+- Desktop interface with Turkish and English UI, page range, DPI, progress and log
+- Handles 500-1000 page books with streamed page rendering
+- Runs on Linux; requires Tesseract OCR and Poppler
 
-## 🚀 Kullanım
+## Installation
 
-### Grafik arayüz (önerilen)
+Build and run from source:
 
 ```bash
-python gui.py
+git clone https://github.com/colgecen/YourBook-YourLanguage.git
+cd YourBook-YourLanguage
+./yourbook-yourlanguage --install
 ```
 
-Arayüzden kaynak PDF'i seçin, kayıt klasörünü ve çıktı dosya adını ayrı ayrı
-belirleyin, sayfa aralığını ve DPI'ı ayarlayıp **Çeviriyi Başlat** düğmesine basın.
-İlerleme ve hatalar aynı pencerede görünür; başarılı işlemden 10 saniye sonra
-günlük paneli otomatik temizlenir. **Son Çıktıyı Aç** düğmesi, en son tamamlanmış
-çıktı PDF'ini açar (yarım kalmış dosyalar dikkate alınmaz). Dosya ve klasör seçimi
-KDE'de yerel `kdialog` penceresiyle açılır. Linux'ta Tkinter yoksa:
-`sudo dnf install python3-tkinter` (Fedora) veya `sudo apt install python3-tk`
-(Debian/Ubuntu).
-
-### Komut satırı
+`--install` is a one-time step that lets you type `yourbook-yourlanguage` (no `./`) to open the build menu:
 
 ```bash
-python main.py --input input/kitap.pdf --output output/kitap_tr.pdf
+yourbook-yourlanguage
 ```
 
-Sayfa aralığı ile:
+Prebuilt binaries are available on the [Releases](https://github.com/colgecen/YourBook-YourLanguage/releases) page.
+
+## Usage
+
+Run the app straight from source (press `Ctrl+C` to stop):
+
 ```bash
-python main.py --input input/kitap.pdf --output output/kitap_tr.pdf --start-page 1 --end-page 50
+./yourbook-yourlanguage
 ```
 
-Checkpoint dosyası otomatik olarak oluşturulur; işlem yarıda kalırsa aynı komutu tekrar çalıştırmanız yeterlidir.
+The desktop window opens on the English-to-Turkish workspace. Select a source PDF, choose the output folder and file name, set the page range and DPI, then click **Start Translation**. Use the language menu at the top right to switch the interface between Turkish and English; OCR and translation always run from English to Turkish. Progress, warnings and errors appear in the log panel.
 
-## 📁 Proje Yapısı
+Configuration lives in `~/.config/yourbook-yourlanguage/config.json`.
 
-```
-book-translator-pdf/
-├── main.py                     # CLI giriş noktası ve pipeline orkestrasyonu
-├── gui.py                      # Tkinter masaüstü arayüzü
-├── requirements.txt
-├── README.md
-├── .gitignore
-├── assets/
-│   ├── fonts/
-│   │   ├── Garamond-Regular.ttf
-│   │   └── Garamond-Italic.ttf
-│   └── icons/
-│       ├── book.png
-│       └── book.ico
-├── core/
-│   ├── __init__.py
-│   ├── ocr_engine.py           # Tesseract OCR ve metin/koordinat çıkarma
-│   ├── cleaner.py              # OpenCV ile arka plan temizleme (inpainting)
-│   ├── translator.py           # deep-translator entegrasyonu ve cache
-│   └── pdf_builder.py          # Garamond fontlu, auto-fit PDF oluşturucu
-├── input/                      # Çevrilecek PDF buraya konur
-└── output/                     # Çıktı Türkçe PDF buraya kaydolur
-```
+## License
 
-## 📄 Lisans
-
-EB Garamond fontu [SIL Open Font License 1.1](https://scripts.sil.org/OFL) ile dağıtılmaktadır.
+This project is licensed under the [MIT](LICENSE) license.

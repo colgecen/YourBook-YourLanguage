@@ -14,6 +14,9 @@ output/*
 # Yerel arac binaries (tesseract vb.)
 .tools/
 
+# Build output
+build/
+
 # Checkpoint / cache
 *.checkpoint.json
 *.cache.json
