@@ -29,6 +29,7 @@ MAIN = ROOT / "main.py"
 ICON_DIR = ROOT / "assets" / "icons"
 ICON_PNG = ICON_DIR / "book.png"
 ICON_ICO = ICON_DIR / "book.ico"
+LAST_OUTPUT_FILE = ROOT / ".cache" / "last_output.json"
 
 COLORS = {
     "bg": "#f1f5f9",
@@ -240,6 +241,7 @@ class App:
             self._name_custom = True
             self.folder_var.set(str(output.parent))
             self.name_var.set(output.stem)
+        self._load_last_output()
         self._update_input_info()
         self._update_output_preview()
         self._sync_open_button()
@@ -789,6 +791,31 @@ class App:
             color = COLORS["warn"]
         self.output_preview.configure(text=text, fg=color)
 
+    def _load_last_output(self) -> None:
+        """Önceki oturumda üretilen son çıktı yolunu yükler."""
+        try:
+            data = json.loads(LAST_OUTPUT_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        raw = data.get("path")
+        if not raw:
+            return
+        path = Path(raw)
+        if path.is_file():
+            self.last_output = path
+
+    def _remember_last_output(self, out: Path) -> None:
+        """Son başarılı çıktıyı oturumlar arasında hatırlar."""
+        self.last_output = out
+        try:
+            LAST_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            LAST_OUTPUT_FILE.write_text(
+                json.dumps({"path": str(out)}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
     def _latest_output(self) -> Path | None:
         """Uygulamanın ürettiği en son çıktı PDF'ini bulur."""
         candidates: list[Path] = []
@@ -1116,7 +1143,7 @@ class App:
             return
         if code == 0:
             if out.is_file():
-                self.last_output = out
+                self._remember_last_output(out)
             self.progress.configure(value=100)
             self.percent_var.set("%100")
             self.status_var.set("Tamamlandı · günlük 10 sn sonra temizlenecek")
@@ -1149,7 +1176,7 @@ class App:
         if out is None:
             messagebox.showinfo("Çıktı yok", "Henüz oluşturulmuş bir çıktı PDF yok.")
             return
-        self.last_output = out
+        self._remember_last_output(out)
         try:
             if sys.platform.startswith("win"):
                 os.startfile(str(out))  # type: ignore[attr-defined]
