@@ -237,6 +237,7 @@ class App:
     # ------------------------------------------------------------------ UI
     def _setup_window(self) -> None:
         self.root.title("Kitap PDF Çevirmen")
+        self.root.iconname("Kitap PDF Çevirmen")
         self.root.geometry("940x830")
         self.root.minsize(860, 740)
         self.root.configure(bg=COLORS["bg"])
@@ -1137,7 +1138,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    root = tk.Tk()
+    root = tk.Tk(className="KitapPdfCevirmen")
     App(root, args.input, args.output, args.print_window_id)
     root.mainloop()
     return 0
