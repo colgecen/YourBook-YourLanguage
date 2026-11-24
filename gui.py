@@ -27,7 +27,6 @@ from tkinter import filedialog, messagebox, ttk
 ROOT = Path(__file__).resolve().parent
 MAIN = ROOT / "main.py"
 ICON_PNG = ROOT / "assets" / "icon.png"
-LAST_OUTPUT_FILE = ROOT / ".cache" / "last_output.json"
 
 COLORS = {
     "bg": "#f1f5f9",
@@ -50,7 +49,9 @@ PROGRESS_RE = re.compile(r"Sayfalar:\s+(\d+)%\|[^|]*\|\s*(\d+)/(\d+)")
 FORBIDDEN_NAME_CHARS = '<>:"/\\|?*'
 
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+XDG_CACHE = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
 CONFIG_FILE = XDG_CONFIG / "yourbook-yourlanguage" / "config.json"
+LAST_OUTPUT_FILE = XDG_CACHE / "yourbook-yourlanguage" / "last_output.json"
 
 TEXTS: dict[str, dict[str, str]] = {
     "tr": {

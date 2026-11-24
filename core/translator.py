@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -16,11 +17,14 @@ from deep_translator import GoogleTranslator, MyMemoryTranslator
 # Google'in web arayuzu bazi aglarda 429 donduruyor; bu ucnokta genelde calisir.
 GOOGLE_HTTP_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 
+XDG_CACHE = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+DEFAULT_CACHE_PATH = XDG_CACHE / "yourbook-yourlanguage" / "translations.db"
+
 
 class TranslationCache:
     """Tekrar eden metinleri atlamak icin SQLite tabanli ceviri onbellegi."""
 
-    def __init__(self, db_path: str | Path = ".cache/translations.db") -> None:
+    def __init__(self, db_path: str | Path = DEFAULT_CACHE_PATH) -> None:
         """Cache veritabanini acar.
 
         Args:
