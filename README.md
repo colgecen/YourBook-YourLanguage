@@ -8,7 +8,7 @@ Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sa
 - **Garamond Auto-Fit Dizgi:** Türkçe metin uzamalarına karşı font boyutunu dinamik küçülterek sayfadan taşmayı önleme.
 - **Görsel Temizleme (Inpainting):** OpenCV ile arka plan dokusunu koruyarak eski İngilizce yazıları silme.
 - **Kesinti Koruması (Checkpoint):** Dev kitaplarda işlem yarıda kalırsa kaldığı sayfadan devam edebilme.
-- **Grafik Arayüz:** Tkinter tabanlı masaüstü arayüzü; dosya seçimi, sayfa aralığı, canlı ilerleme ve günlük.
+- **Grafik Arayüz:** Tkinter tabanlı masaüstü arayüzü; dosya seçimi, ayrı kayıt klasörü ve çıktı dosya adı, canlı ilerleme, günlük ve 10 saniyede otomatik temizlenen işlem paneli.
 
 ## 🛠️ Kurulum
 
@@ -30,10 +30,13 @@ Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sa
 python gui.py
 ```
 
-Arayüzden kaynak PDF'i seçin, çıktı konumunu belirleyin, sayfa aralığını ve DPI'ı
-ayarlayıp **Çeviriyi Başlat** düğmesine basın. İlerleme ve hatalar aynı pencerede
-görünür. Linux'ta Tkinter yoksa: `sudo dnf install python3-tkinter`
-(Fedora) veya `sudo apt install python3-tk` (Debian/Ubuntu).
+Arayüzden kaynak PDF'i seçin, kayıt klasörünü ve çıktı dosya adını ayrı ayrı
+belirleyin, sayfa aralığını ve DPI'ı ayarlayıp **Çeviriyi Başlat** düğmesine basın.
+İlerleme ve hatalar aynı pencerede görünür; başarılı işlemden 10 saniye sonra
+günlük paneli otomatik temizlenir. Dosya ve klasör seçimi KDE'de yerel
+`kdialog` penceresiyle açılır. Linux'ta Tkinter yoksa:
+`sudo dnf install python3-tkinter` (Fedora) veya `sudo apt install python3-tk`
+(Debian/Ubuntu).
 
 ### Komut satırı
 
@@ -58,9 +61,12 @@ book-translator-pdf/
 ├── README.md
 ├── .gitignore
 ├── assets/
-│   └── fonts/
-│       ├── Garamond-Regular.ttf
-│       └── Garamond-Italic.ttf
+│   ├── fonts/
+│   │   ├── Garamond-Regular.ttf
+│   │   └── Garamond-Italic.ttf
+│   └── icons/
+│       ├── book.png
+│       └── book.ico
 ├── core/
 │   ├── __init__.py
 │   ├── ocr_engine.py           # Tesseract OCR ve metin/koordinat çıkarma

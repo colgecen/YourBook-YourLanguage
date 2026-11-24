@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Kitap PDF Cevirmen - masaustu grafik arayuzu (Tkinter).
 
-CLI'yi (main.py) arka planda calistirir; dosya secimi, sayfa araligi,
-ilerleme cubugu ve canli gunluk sunar. Ek pip bagimliligi gerektirmez.
+CLI'yi (main.py) arka planda calistirir; kaynak secimi, kayit klasoru,
+cikti dosya adi, sayfa araligi, ilerleme cubugu ve canli gunluk sunar.
+Ek pip bagimliligi gerektirmez.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import argparse
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -23,6 +25,9 @@ from tkinter import filedialog, messagebox, ttk
 
 ROOT = Path(__file__).resolve().parent
 MAIN = ROOT / "main.py"
+ICON_DIR = ROOT / "assets" / "icons"
+ICON_PNG = ICON_DIR / "book.png"
+ICON_ICO = ICON_DIR / "book.ico"
 
 COLORS = {
     "bg": "#f1f5f9",
@@ -42,6 +47,7 @@ COLORS = {
 }
 
 PROGRESS_RE = re.compile(r"Sayfalar:\s+(\d+)%\|[^|]*\|\s*(\d+)/(\d+)")
+FORBIDDEN_NAME_CHARS = '<>:"/\\|?*'
 
 
 def human_size(num: int) -> str:
@@ -55,14 +61,115 @@ def human_size(num: int) -> str:
 
 
 def pdf_page_count(path: Path) -> int | None:
-    """PyMuPDF varsa PDF sayfa sayisini dondurur; yoksa None."""
+    """PDF sayfa sayisini dondurur; okunamayan/parolali PDF'lerde None."""
     try:
         import pymupdf
 
         with pymupdf.open(str(path)) as doc:
+            if doc.needs_pass or doc.page_count <= 0:
+                return None
             return doc.page_count
     except Exception:
         return None
+
+
+def valid_file_name(name: str) -> bool:
+    """Cikti dosya adinin gecerli olup olmadigini kontrol eder."""
+    if not name or name in {".", ".."}:
+        return False
+    if name != name.strip() or name.endswith("."):
+        return False
+    return not any(char in name for char in FORBIDDEN_NAME_CHARS)
+
+
+def display_path(path: Path) -> str:
+    """Proje klasoru altindaysa kisa yol gosterir."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _native_pick(kind: str, initial: Path) -> tuple[str | None, bool]:
+    """KDE/zenity yerel secim penceresi.
+
+    Returns:
+        (secili yol veya None, islem ele alindi mi)
+    """
+    if shutil.which("kdialog"):
+        if kind == "file":
+            cmd = [
+                "kdialog",
+                "--title",
+                "Kaynak PDF seç",
+                "--getopenfilename",
+                str(initial),
+                "PDF dosyaları (*.pdf)",
+            ]
+        else:
+            cmd = [
+                "kdialog",
+                "--title",
+                "Kayıt klasörü seç",
+                "--getexistingdirectory",
+                str(initial),
+            ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.TimeoutExpired):
+            return None, False
+        if result.returncode == 0:
+            return result.stdout.strip() or None, True
+        if result.returncode == 1:
+            return None, True
+        return None, False
+    if shutil.which("zenity"):
+        if kind == "file":
+            cmd = [
+                "zenity",
+                "--file-selection",
+                "--title=Kaynak PDF seç",
+                "--file-filter=PDF dosyaları | *.pdf",
+            ]
+        else:
+            cmd = ["zenity", "--file-selection", "--directory", "--title=Kayıt klasörü seç"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.TimeoutExpired):
+            return None, False
+        if result.returncode == 0:
+            return result.stdout.strip() or None, True
+        if result.returncode == 1:
+            return None, True
+        return None, False
+    return None, False
+
+
+def pick_pdf_file(initial: Path, parent: tk.Misc) -> str | None:
+    """PDF secimi icin yerel (KDE) pencereyi, yoksa Tk penceresini acar."""
+    path, handled = _native_pick("file", initial)
+    if handled:
+        return path
+    selected = filedialog.askopenfilename(
+        parent=parent,
+        title="Kaynak PDF seç",
+        initialdir=str(initial),
+        filetypes=[("PDF dosyaları", "*.pdf")],
+    )
+    return selected or None
+
+
+def pick_directory(initial: Path, parent: tk.Misc) -> str | None:
+    """Klasor secimi icin yerel pencereyi, yoksa Tk penceresini acar."""
+    path, handled = _native_pick("folder", initial)
+    if handled:
+        return path
+    selected = filedialog.askdirectory(
+        parent=parent,
+        title="Kayıt klasörü seç",
+        initialdir=str(initial),
+    )
+    return selected or None
 
 
 def subprocess_env() -> dict[str, str]:
@@ -90,14 +197,18 @@ class App:
         self.proc: subprocess.Popen | None = None
         self.events: queue.Queue = queue.Queue()
         self.last_output: Path | None = None
-        self._auto_output = True
+        self._name_custom = False
         self._lock_widgets: list[tk.Widget] = []
         self._browse_buttons: list[ttk.Button] = []
         self._stopping = False
         self._info_job: str | None = None
+        self._clear_job: str | None = None
+        self._icon_img: tk.PhotoImage | None = None
+        self._logo_img: object | None = None
 
         self.input_var = tk.StringVar()
-        self.output_var = tk.StringVar()
+        self.folder_var = tk.StringVar(value=str(ROOT / "output"))
+        self.name_var = tk.StringVar()
         self.start_var = tk.StringVar(value="1")
         self.end_var = tk.StringVar()
         self.dpi_var = tk.StringVar(value="200")
@@ -112,8 +223,12 @@ class App:
         if input_path:
             self._set_input(input_path)
         if output_path:
-            self._auto_output = False
-            self.output_var.set(str(self._abs_path(output_path)))
+            output = self._abs_path(output_path)
+            self._name_custom = True
+            self.folder_var.set(str(output.parent))
+            self.name_var.set(output.stem)
+        self._update_input_info()
+        self._update_output_preview()
 
         if print_window_id:
             self.root.after(600, self._print_window_id)
@@ -122,12 +237,35 @@ class App:
     # ------------------------------------------------------------------ UI
     def _setup_window(self) -> None:
         self.root.title("Kitap PDF Çevirmen")
-        self.root.geometry("940x760")
-        self.root.minsize(840, 680)
+        self.root.geometry("940x830")
+        self.root.minsize(860, 740)
         self.root.configure(bg=COLORS["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         default_font = tkfont.nametofont("TkDefaultFont")
         default_font.configure(family="DejaVu Sans", size=10)
+        self._load_app_icon()
+
+    def _load_app_icon(self) -> None:
+        if ICON_PNG.exists():
+            try:
+                self._icon_img = tk.PhotoImage(file=str(ICON_PNG))
+                self.root.iconphoto(True, self._icon_img)
+            except tk.TclError:
+                self._icon_img = None
+        if sys.platform.startswith("win") and ICON_ICO.exists():
+            try:
+                self.root.iconbitmap(default=str(ICON_ICO))
+            except tk.TclError:
+                pass
+        if ICON_PNG.exists():
+            try:
+                from PIL import Image, ImageTk
+
+                logo = Image.open(ICON_PNG).convert("RGBA")
+                logo = logo.resize((50, 50), Image.LANCZOS)
+                self._logo_img = ImageTk.PhotoImage(logo)
+            except Exception:  # noqa: BLE001 - logo opsiyonel
+                self._logo_img = None
 
     def _setup_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -189,24 +327,41 @@ class App:
             darkcolor=COLORS["accent"],
         )
 
+    def _card_label(self, parent: tk.Misc, text: str) -> tk.Label:
+        return tk.Label(
+            parent,
+            text=text,
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("DejaVu Sans", 9, "bold"),
+        )
+
     def _build_ui(self) -> None:
-        header = tk.Frame(self.root, bg=COLORS["header"], height=96)
+        header = tk.Frame(self.root, bg=COLORS["header"], height=100)
         header.pack(fill="x")
         header.pack_propagate(False)
+        header_left = tk.Frame(header, bg=COLORS["header"])
+        header_left.pack(side="left", padx=30, pady=16)
+        if self._logo_img is not None:
+            tk.Label(header_left, image=self._logo_img, bg=COLORS["header"]).pack(
+                side="left", padx=(0, 14)
+            )
+        header_text = tk.Frame(header_left, bg=COLORS["header"])
+        header_text.pack(side="left")
         tk.Label(
-            header,
+            header_text,
             text="Kitap PDF Çevirmen",
             bg=COLORS["header"],
             fg="white",
             font=("DejaVu Sans", 20, "bold"),
-        ).pack(anchor="w", padx=30, pady=(18, 0))
+        ).pack(anchor="w")
         tk.Label(
-            header,
+            header_text,
             text="Taranmış İngilizce PDF → Türkçe  ·  Garamond dizgi  ·  Yerel OCR",
             bg=COLORS["header"],
             fg=COLORS["header_soft"],
             font=("DejaVu Sans", 10),
-        ).pack(anchor="w", padx=31, pady=(2, 0))
+        ).pack(anchor="w", pady=(2, 0))
         self.badge = tk.Label(
             header,
             text="●  Hazır",
@@ -216,10 +371,10 @@ class App:
             padx=12,
             pady=5,
         )
-        self.badge.place(relx=1.0, x=-30, y=26, anchor="ne")
+        self.badge.place(relx=1.0, x=-30, y=30, anchor="ne")
 
         body = tk.Frame(self.root, bg=COLORS["bg"])
-        body.pack(fill="both", expand=True, padx=26, pady=(18, 4))
+        body.pack(fill="both", expand=True, padx=26, pady=(16, 4))
         body.columnconfigure(0, weight=1)
         body.rowconfigure(3, weight=1)
 
@@ -232,30 +387,26 @@ class App:
         )
         card.grid(row=0, column=0, sticky="ew")
         inner = tk.Frame(card, bg=COLORS["card"])
-        inner.pack(fill="x", padx=18, pady=16)
+        inner.pack(fill="x", padx=18, pady=14)
         inner.columnconfigure(1, weight=1)
 
-        tk.Label(
-            inner,
-            text="Kaynak PDF",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("DejaVu Sans", 9, "bold"),
-        ).grid(row=0, column=0, columnspan=3, sticky="w")
+        self._card_label(inner, "1 · Kaynak PDF").grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
         self.input_entry = ttk.Entry(
             inner, textvariable=self.input_var, style="Field.TEntry"
         )
         self.input_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self.input_browse = ttk.Button(
             inner,
-            text="Gözat…",
+            text="Dosya Seç…",
             style="Secondary.TButton",
             command=self._browse_input,
         )
         self.input_browse.grid(row=1, column=2, padx=(8, 0), pady=(4, 0))
         self.input_info = tk.Label(
             inner,
-            text="Çevrilecek taranmış PDF dosyasını seçin.",
+            text="Çevrilecek PDF dosyasını seçin.",
             bg=COLORS["card"],
             fg=COLORS["muted"],
             font=("DejaVu Sans", 9),
@@ -263,28 +414,52 @@ class App:
         self.input_info.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 12))
         self._browse_buttons.append(self.input_browse)
 
-        tk.Label(
-            inner,
-            text="Çıktı PDF",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("DejaVu Sans", 9, "bold"),
-        ).grid(row=3, column=0, columnspan=3, sticky="w")
-        self.output_entry = ttk.Entry(
-            inner, textvariable=self.output_var, style="Field.TEntry"
+        self._card_label(inner, "2 · Nereye kaydedilsin?").grid(
+            row=3, column=0, columnspan=3, sticky="w"
         )
-        self.output_entry.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 12))
-        self.output_browse = ttk.Button(
+        self.folder_entry = ttk.Entry(
+            inner, textvariable=self.folder_var, style="Field.TEntry"
+        )
+        self.folder_entry.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.folder_browse = ttk.Button(
             inner,
-            text="Kaydet…",
+            text="Klasör Seç…",
             style="Secondary.TButton",
-            command=self._browse_output,
+            command=self._browse_folder,
         )
-        self.output_browse.grid(row=4, column=2, padx=(8, 0), pady=(4, 12))
-        self._browse_buttons.append(self.output_browse)
+        self.folder_browse.grid(row=4, column=2, padx=(8, 0), pady=(4, 0))
+        self._browse_buttons.append(self.folder_browse)
+
+        self._card_label(inner, "3 · Çıktı dosya adı").grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(12, 0)
+        )
+        name_row = tk.Frame(inner, bg=COLORS["card"])
+        name_row.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        name_row.columnconfigure(0, weight=1)
+        self.name_entry = ttk.Entry(
+            name_row, textvariable=self.name_var, style="Field.TEntry"
+        )
+        self.name_entry.grid(row=0, column=0, sticky="ew")
+        tk.Label(
+            name_row,
+            text=".pdf",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("DejaVu Sans", 10, "bold"),
+        ).grid(row=0, column=1, padx=(8, 0))
+        self.output_preview = tk.Label(
+            inner,
+            text="",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("DejaVu Sans", 8),
+            anchor="w",
+            justify="left",
+        )
+        self.output_preview.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(6, 12))
 
         options = tk.Frame(inner, bg=COLORS["card"])
-        options.grid(row=5, column=0, columnspan=3, sticky="w")
+        options.grid(row=8, column=0, columnspan=3, sticky="w")
         tk.Label(
             options,
             text="Başlangıç sayfası",
@@ -338,12 +513,20 @@ class App:
             font=("DejaVu Sans", 8),
         ).grid(row=1, column=4, padx=(8, 0), sticky="w", pady=(5, 0))
 
-        self._lock_widgets.extend([self.input_entry, self.output_entry, self.start_entry,
-                                   self.end_entry, self.dpi_box])
+        self._lock_widgets.extend(
+            [
+                self.input_entry,
+                self.folder_entry,
+                self.name_entry,
+                self.start_entry,
+                self.end_entry,
+                self.dpi_box,
+            ]
+        )
 
         # --- Butonlar ----------------------------------------------------
         buttons = tk.Frame(body, bg=COLORS["bg"])
-        buttons.grid(row=1, column=0, sticky="ew", pady=(14, 10))
+        buttons.grid(row=1, column=0, sticky="ew", pady=(12, 8))
         self.start_btn = ttk.Button(
             buttons,
             text="▶  Çeviriyi Başlat",
@@ -375,9 +558,9 @@ class App:
             highlightbackground=COLORS["border"],
             highlightthickness=1,
         )
-        progress_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        progress_card.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         pinner = tk.Frame(progress_card, bg=COLORS["card"])
-        pinner.pack(fill="x", padx=18, pady=10)
+        pinner.pack(fill="x", padx=18, pady=9)
         pinner.columnconfigure(0, weight=1)
         self.status_label = tk.Label(
             pinner,
@@ -400,7 +583,7 @@ class App:
             mode="determinate",
             maximum=100,
         )
-        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 0))
 
         # --- Gunluk ------------------------------------------------------
         log_header = tk.Frame(body, bg=COLORS["bg"])
@@ -439,9 +622,9 @@ class App:
             relief="flat",
             bd=0,
             wrap="word",
-            height=9,
+            height=7,
             padx=12,
-            pady=10,
+            pady=9,
             font=("DejaVu Sans Mono", 9),
             state="disabled",
         )
@@ -457,26 +640,23 @@ class App:
             fg=COLORS["muted"],
             font=("DejaVu Sans", 8),
         )
-        footer.pack(side="bottom", pady=(0, 8))
+        footer.pack(side="bottom", pady=(0, 7))
         self.root.update_idletasks()
 
     def _bind_events(self) -> None:
         self.input_var.trace_add("write", lambda *_: self._schedule_input_info())
-        self.output_var.trace_add("write", lambda *_: self._sync_open_button())
+        self.folder_var.trace_add("write", lambda *_: self._on_destination_changed())
+        self.name_var.trace_add("write", lambda *_: self._on_destination_changed())
+        self.name_entry.bind("<KeyRelease>", self._on_name_typed)
+
+    # -------------------------------------------------------------- helpers
+    def _print_window_id(self) -> None:
+        print("WINDOW_ID", self.root.winfo_id(), flush=True)
 
     @staticmethod
     def _abs_path(value: str) -> Path:
         path = Path(value).expanduser()
         return path if path.is_absolute() else (ROOT / path).resolve()
-
-    def _schedule_input_info(self) -> None:
-        if self._info_job is not None:
-            self.root.after_cancel(self._info_job)
-        self._info_job = self.root.after(300, self._update_input_info)
-
-    # -------------------------------------------------------------- helpers
-    def _print_window_id(self) -> None:
-        print("WINDOW_ID", self.root.winfo_id(), flush=True)
 
     def _log(self, message: str) -> None:
         stamp = time.strftime("%H:%M:%S")
@@ -486,99 +666,217 @@ class App:
         self.log_text.configure(state="disabled")
 
     def _clear_log(self) -> None:
+        self._cancel_clear_timer()
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
 
+    def _clear_log_after_done(self) -> None:
+        self._clear_job = None
+        self._clear_log()
+        self.status_var.set("Tamamlandı")
+
+    def _cancel_clear_timer(self) -> None:
+        if self._clear_job is not None:
+            try:
+                self.root.after_cancel(self._clear_job)
+            except tk.TclError:
+                pass
+            self._clear_job = None
+
     def _badge(self, text: str, color: str) -> None:
         self.badge.configure(text=text, fg=color)
+
+    def _schedule_input_info(self) -> None:
+        if self._info_job is not None:
+            self.root.after_cancel(self._info_job)
+        self._info_job = self.root.after(300, self._update_input_info)
+
+    def _set_input_info(self, text: str, color: str) -> None:
+        self.input_info.configure(text=text, fg=color)
 
     def _update_input_info(self) -> None:
         self._info_job = None
         raw = self.input_var.get().strip()
         if not raw:
-            self.input_info.configure(text="Çevrilecek taranmış PDF dosyasını seçin.")
+            self._set_input_info("Çevrilecek PDF dosyasını seçin.", COLORS["muted"])
             return
         path = self._abs_path(raw)
-        if not path.is_file():
-            self.input_info.configure(text="Dosya bulunamadı.")
+        if not path.exists():
+            self._set_input_info("Dosya bulunamadı. Yazı okunamadı.", COLORS["err"])
+            return
+        if path.suffix.lower() != ".pdf":
+            self._set_input_info(
+                "Desteklenmeyen dosya. Yalnızca PDF destekleniyor.", COLORS["err"]
+            )
             return
         pages = pdf_page_count(path)
-        page_text = f"{pages} sayfa" if pages else "sayfa sayısı okunamadı"
+        if not pages:
+            self._set_input_info(
+                "Yazı okunamadı. PDF bozuk veya parola korumalı.", COLORS["err"]
+            )
+            return
         try:
             size = human_size(path.stat().st_size)
         except OSError:
             size = "?"
-        self.input_info.configure(text=f"{page_text}  ·  {size}")
+        self._set_input_info(
+            f"{pages} sayfa  ·  {size}  ·  yazı okunabilir", COLORS["muted"]
+        )
+
+    def _on_name_typed(self, _event: tk.Event) -> None:
+        self._name_custom = True
+
+    def _on_destination_changed(self) -> None:
+        self._update_output_preview()
+        self._sync_open_button()
+
+    @staticmethod
+    def _clean_name(raw: str) -> str:
+        name = raw.strip()
+        if name.lower().endswith(".pdf"):
+            name = name[:-4].rstrip()
+        return name
+
+    def _output_path(self) -> Path | None:
+        folder = self.folder_var.get().strip()
+        name = self._clean_name(self.name_var.get())
+        if not folder or not valid_file_name(name):
+            return None
+        return self._abs_path(folder) / f"{name}.pdf"
+
+    def _update_output_preview(self) -> None:
+        folder_raw = self.folder_var.get().strip()
+        name = self._clean_name(self.name_var.get())
+        if not folder_raw:
+            self.output_preview.configure(
+                text="Kayıt klasörü seçin.", fg=COLORS["err"]
+            )
+            return
+        if not name:
+            self.output_preview.configure(text="Dosya adı girin.", fg=COLORS["err"])
+            return
+        if not valid_file_name(name):
+            self.output_preview.configure(
+                text='Geçersiz dosya adı. \\ / : * ? " < > | kullanılamaz.',
+                fg=COLORS["err"],
+            )
+            return
+        folder = self._abs_path(folder_raw)
+        path = folder / f"{name}.pdf"
+        text = f"Çıktı: {display_path(path)}"
+        color = COLORS["muted"]
+        if not folder.exists():
+            text += "   (klasör oluşturulacak)"
+            color = COLORS["warn"]
+        elif path.exists():
+            text += "   (mevcut dosyanın üzerine yazılacak)"
+            color = COLORS["warn"]
+        self.output_preview.configure(text=text, fg=color)
 
     def _sync_open_button(self) -> None:
-        raw = self.output_var.get().strip()
-        if raw and self._abs_path(raw).is_file():
+        out = self._output_path()
+        if out is not None and out.is_file():
             self.open_btn.state(["!disabled"])
         else:
             self.open_btn.state(["disabled"])
 
-    def _auto_output_for(self, input_path: Path) -> str:
-        stem = input_path.stem or "kitap"
-        return str((ROOT / "output" / f"{stem}_tr.pdf").resolve())
-
     def _set_input(self, value: str) -> None:
-        self.input_var.set(str(Path(value).expanduser().resolve()))
-        if self._auto_output or not self.output_var.get().strip():
-            self.output_var.set(self._auto_output_for(Path(value)))
+        path = self._abs_path(value)
+        self.input_var.set(str(path))
+        if not self._name_custom or not self.name_var.get().strip():
+            stem = path.stem or "kitap"
+            self.name_var.set(f"{stem}_tr")
+        if not self.folder_var.get().strip():
+            self.folder_var.set(str(ROOT / "output"))
+        self._update_input_info()
+        self._update_output_preview()
 
     def _browse_input(self) -> None:
-        initial = ROOT / "input"
-        path = filedialog.askopenfilename(
-            parent=self.root,
-            title="Kaynak PDF seç",
-            initialdir=str(initial if initial.exists() else ROOT),
-            filetypes=[("PDF dosyaları", "*.pdf"), ("Tüm dosyalar", "*.*")],
-        )
+        current = self.input_var.get().strip()
+        if current:
+            candidate = self._abs_path(current).parent
+        else:
+            candidate = ROOT / "input"
+        if not candidate.is_dir():
+            candidate = Path.home()
+        path = pick_pdf_file(candidate, self.root)
         if path:
             self._set_input(path)
 
-    def _browse_output(self) -> None:
-        current = Path(self.output_var.get().strip() or (ROOT / "output" / "kitap_tr.pdf"))
-        path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="Çıktı PDF konumu",
-            initialdir=str(current.parent),
-            initialfile=current.name,
-            defaultextension=".pdf",
-            filetypes=[("PDF dosyası", "*.pdf")],
-        )
+    def _browse_folder(self) -> None:
+        current = self.folder_var.get().strip()
+        candidate = self._abs_path(current) if current else ROOT / "output"
+        if not candidate.is_dir():
+            candidate = ROOT
+        path = pick_directory(candidate, self.root)
         if path:
-            self._auto_output = False
-            self.output_var.set(str(Path(path).expanduser().resolve()))
+            self.folder_var.set(str(Path(path).resolve()))
 
     # ---------------------------------------------------------------- start
+    def _show_input_error(self, message: str) -> None:
+        self._set_input_info(message, COLORS["err"])
+        messagebox.showerror("Geçersiz dosya", message)
+
     def _validate(self) -> tuple[Path, Path, int, int | None, int] | None:
         raw_in = self.input_var.get().strip()
-        raw_out = self.output_var.get().strip()
         if not raw_in:
             messagebox.showwarning("Eksik bilgi", "Önce bir kaynak PDF seçin.")
             return None
         inp = self._abs_path(raw_in)
-        if not inp.is_file() or inp.suffix.lower() != ".pdf":
-            messagebox.showerror("Geçersiz PDF", f"PDF bulunamadı:\n{inp}")
+        if not inp.exists():
+            self._show_input_error("Dosya bulunamadı. Yazı okunamadı.")
             return None
-        if not raw_out:
-            messagebox.showwarning("Eksik bilgi", "Çıktı PDF konumunu girin.")
+        if inp.suffix.lower() != ".pdf":
+            self._show_input_error(
+                "Desteklenmeyen dosya. Yalnızca PDF destekleniyor."
+            )
             return None
-        out = self._abs_path(raw_out)
-        if out.suffix.lower() != ".pdf":
-            out = out.with_suffix(".pdf")
-            self.output_var.set(str(out))
+        pages = pdf_page_count(inp)
+        if not pages:
+            self._show_input_error(
+                "Yazı okunamadı. PDF bozuk veya parola korumalı."
+            )
+            return None
+
+        folder_raw = self.folder_var.get().strip()
+        if not folder_raw:
+            messagebox.showwarning("Eksik bilgi", "Kayıt klasörünü seçin.")
+            return None
+        name = self._clean_name(self.name_var.get())
+        if not valid_file_name(name):
+            messagebox.showerror(
+                "Geçersiz dosya adı",
+                'Dosya adı boş olamaz ve \\ / : * ? " < > | karakterlerini içeremez.',
+            )
+            return None
+        folder = self._abs_path(folder_raw)
+        out = folder / f"{name}.pdf"
         if out.resolve() == inp.resolve():
-            messagebox.showerror("Geçersiz konum", "Çıktı, kaynak PDF ile aynı olamaz.")
+            messagebox.showerror(
+                "Geçersiz konum", "Çıktı, kaynak PDF ile aynı dosya olamaz."
+            )
             return None
+        if not folder.exists():
+            if not messagebox.askyesno(
+                "Klasör yok",
+                f"Bu klasör henüz yok:\n{folder}\n\nOluşturulsun mu?",
+            ):
+                return None
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                messagebox.showerror("Klasör oluşturulamadı", str(exc))
+                return None
+
         try:
             start = int(self.start_var.get().strip())
             if start < 1:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Geçersiz aralık", "Başlangıç sayfası 1 veya daha büyük olmalı.")
+            messagebox.showerror(
+                "Geçersiz aralık", "Başlangıç sayfası 1 veya daha büyük olmalı."
+            )
             return None
         end_raw = self.end_var.get().strip()
         if end_raw:
@@ -589,7 +887,7 @@ class App:
             except ValueError:
                 messagebox.showerror(
                     "Geçersiz aralık",
-                    "Bitiş sayfası, başlangıçtan küçük olamaz ve sayı olmalı.",
+                    "Bitiş sayfası sayı olmalı ve başlangıçtan küçük olamaz.",
                 )
                 return None
         else:
@@ -598,8 +896,7 @@ class App:
             dpi = int(self.dpi_var.get())
         except ValueError:
             dpi = 200
-        pages = pdf_page_count(inp)
-        if pages and end and end > pages:
+        if end is not None and end > pages:
             if not messagebox.askyesno(
                 "Aralık düzeltilsin mi?",
                 f"PDF {pages} sayfa. Bitiş {end} yerine {pages} kullanılsın mı?",
@@ -613,7 +910,6 @@ class App:
                 f"Bu dosya zaten var:\n{out}\n\nÜzerine yazılsın mı?",
             ):
                 return None
-        out.parent.mkdir(parents=True, exist_ok=True)
         return inp, out, start, end, dpi
 
     def _start(self) -> None:
@@ -639,6 +935,7 @@ class App:
         if end is not None:
             cmd.extend(["--end-page", str(end)])
 
+        self._cancel_clear_timer()
         self.last_output = out
         self.progress.configure(value=0)
         self.percent_var.set("%0")
@@ -743,8 +1040,19 @@ class App:
             return
         if PROGRESS_RE.search(line) or line.startswith("Sayfalar:"):
             return
-        if any(token in line for token in ("UYARI", "atlandı", "atlandi", "Traceback",
-                                           "Error", "HATA", "basarisiz", "başarısız")):
+        if any(
+            token in line
+            for token in (
+                "UYARI",
+                "atlandı",
+                "atlandi",
+                "Traceback",
+                "Error",
+                "HATA",
+                "basarisiz",
+                "başarısız",
+            )
+        ):
             self._log(line)
         elif line.startswith("Cikti olusturuldu") or line.startswith("Çıktı"):
             self._log(line)
@@ -762,10 +1070,11 @@ class App:
         if code == 0:
             self.progress.configure(value=100)
             self.percent_var.set("%100")
-            self.status_var.set("Tamamlandı")
+            self.status_var.set("Tamamlandı · günlük 10 sn sonra temizlenecek")
             self._badge("●  Tamamlandı", "#86efac")
             self._log(f"Bitti: {out}")
             self.root.bell()
+            self._clear_job = self.root.after(10000, self._clear_log_after_done)
         else:
             self.status_var.set("Hata ile durdu")
             self._badge("●  Hata", "#fca5a5")
@@ -788,8 +1097,7 @@ class App:
     def _open_output(self) -> None:
         out = self.last_output
         if out is None:
-            raw = self.output_var.get().strip()
-            out = self._abs_path(raw) if raw else None
+            out = self._output_path()
         if out is None or not out.is_file():
             messagebox.showinfo("Çıktı yok", "Henüz oluşturulmuş bir çıktı PDF yok.")
             return
