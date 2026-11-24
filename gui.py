@@ -54,7 +54,7 @@ CONFIG_FILE = XDG_CONFIG / "yourbook-yourlanguage" / "config.json"
 
 TEXTS: dict[str, dict[str, str]] = {
     "tr": {
-        "app_title": "Kitap PDF Çevirmen",
+        "app_title": "YourBook YourLanguage",
         "subtitle": "Taranmış İngilizce PDF → Türkçe  ·  Garamond dizgi  ·  Yerel OCR",
         "badge_ready": "●  Hazır",
         "badge_working": "●  Çalışıyor",
@@ -142,7 +142,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "lang_button": "TR ▾",
     },
     "en": {
-        "app_title": "Book PDF Translator",
+        "app_title": "YourBook YourLanguage",
         "subtitle": "Scanned English PDF → Turkish  ·  Garamond typesetting  ·  Local OCR",
         "badge_ready": "●  Ready",
         "badge_working": "●  Working",

@@ -16,7 +16,7 @@
 - Resumes interrupted books from a checkpoint file
 - Desktop interface with Turkish and English UI, page range, DPI, progress and log
 - Handles 500-1000 page books with streamed page rendering
-- Runs on Linux; requires Tesseract OCR and Poppler
+- Runs on Linux with Python 3 and Tkinter; requires Tesseract OCR and Poppler
 
 ## Installation
 

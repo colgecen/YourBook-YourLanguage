@@ -124,12 +124,21 @@ def build_svg(png_path: Path) -> str:
     from PIL import Image
 
     with Image.open(png_path) as image:
-        width, height = image.size
+        rgb = image.convert("RGB")
+        width, height = rgb.size
+        # The demo has an empty log panel; remove the mouse pointer from that area.
+        pixels = rgb.load()
+        for y in range(int(height * 0.72), int(height * 0.97)):
+            for x in range(int(width * 0.04), int(width * 0.96)):
+                r, g, b = pixels[x, y]
+                if r > 100 and r > g * 1.25 and r > b * 1.25:
+                    pixels[x, y] = (15, 23, 42)
+        rgb.save(png_path)
     encoded = base64.b64encode(png_path.read_bytes()).decode("ascii")
     window_h = height + TITLE_H
     svg_w = width + MARGIN * 2
     svg_h = window_h + MARGIN * 2
-    title = "Book PDF Translator"
+    title = "YourBook YourLanguage"
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}">
   <defs>
     <clipPath id="window-clip">
