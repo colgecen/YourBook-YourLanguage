@@ -9,6 +9,7 @@ Ek pip bagimliligi gerektirmez.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import queue
 import re
@@ -80,6 +81,18 @@ def valid_file_name(name: str) -> bool:
     if name != name.strip() or name.endswith("."):
         return False
     return not any(char in name for char in FORBIDDEN_NAME_CHARS)
+
+
+def is_complete_output(path: Path) -> bool:
+    """Checkpoint varsa islemin gercekten bittigini dogrular."""
+    checkpoint = Path(f"{path}.checkpoint.json")
+    if not checkpoint.exists():
+        return True
+    try:
+        data = json.loads(checkpoint.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(data.get("finished"))
 
 
 def display_path(path: Path) -> str:
@@ -229,6 +242,7 @@ class App:
             self.name_var.set(output.stem)
         self._update_input_info()
         self._update_output_preview()
+        self._sync_open_button()
 
         if print_window_id:
             self.root.after(600, self._print_window_id)
@@ -545,7 +559,7 @@ class App:
         self.stop_btn.state(["disabled"])
         self.open_btn = ttk.Button(
             buttons,
-            text="Çıktıyı Aç",
+            text="Son Çıktıyı Aç",
             style="Secondary.TButton",
             command=self._open_output,
         )
@@ -775,9 +789,42 @@ class App:
             color = COLORS["warn"]
         self.output_preview.configure(text=text, fg=color)
 
+    def _latest_output(self) -> Path | None:
+        """Uygulamanın ürettiği en son çıktı PDF'ini bulur."""
+        candidates: list[Path] = []
+        if self.last_output is not None and self.last_output.is_file():
+            candidates.append(self.last_output)
+        folders: list[Path] = []
+        raw_folder = self.folder_var.get().strip()
+        if raw_folder:
+            folders.append(self._abs_path(raw_folder))
+        default_folder = ROOT / "output"
+        if default_folder not in folders:
+            folders.append(default_folder)
+        input_path: Path | None = None
+        if self.input_var.get().strip():
+            input_path = self._abs_path(self.input_var.get().strip())
+        for folder in folders:
+            if not folder.is_dir():
+                continue
+            for path in folder.glob("*.pdf"):
+                if not path.is_file() or path == input_path:
+                    continue
+                if not is_complete_output(path):
+                    continue
+                is_app_output = (
+                    path.name.lower().endswith("_tr.pdf")
+                    or Path(f"{path}.checkpoint.json").exists()
+                    or path == self.last_output
+                )
+                if is_app_output and path not in candidates:
+                    candidates.append(path)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.stat().st_mtime)
+
     def _sync_open_button(self) -> None:
-        out = self._output_path()
-        if out is not None and out.is_file():
+        if self._latest_output() is not None:
             self.open_btn.state(["!disabled"])
         else:
             self.open_btn.state(["disabled"])
@@ -937,7 +984,6 @@ class App:
             cmd.extend(["--end-page", str(end)])
 
         self._cancel_clear_timer()
-        self.last_output = out
         self.progress.configure(value=0)
         self.percent_var.set("%0")
         self.status_var.set("Başlatılıyor…")
@@ -1069,11 +1115,14 @@ class App:
             self._log("İşlem durduruldu. Aynı ayarlarla kaldığı yerden devam edebilirsiniz.")
             return
         if code == 0:
+            if out.is_file():
+                self.last_output = out
             self.progress.configure(value=100)
             self.percent_var.set("%100")
             self.status_var.set("Tamamlandı · günlük 10 sn sonra temizlenecek")
             self._badge("●  Tamamlandı", "#86efac")
             self._log(f"Bitti: {out}")
+            self._sync_open_button()
             self.root.bell()
             self._clear_job = self.root.after(10000, self._clear_log_after_done)
         else:
@@ -1096,12 +1145,11 @@ class App:
 
     # ---------------------------------------------------------------- misc
     def _open_output(self) -> None:
-        out = self.last_output
+        out = self._latest_output()
         if out is None:
-            out = self._output_path()
-        if out is None or not out.is_file():
             messagebox.showinfo("Çıktı yok", "Henüz oluşturulmuş bir çıktı PDF yok.")
             return
+        self.last_output = out
         try:
             if sys.platform.startswith("win"):
                 os.startfile(str(out))  # type: ignore[attr-defined]

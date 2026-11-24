@@ -33,8 +33,9 @@ python gui.py
 Arayüzden kaynak PDF'i seçin, kayıt klasörünü ve çıktı dosya adını ayrı ayrı
 belirleyin, sayfa aralığını ve DPI'ı ayarlayıp **Çeviriyi Başlat** düğmesine basın.
 İlerleme ve hatalar aynı pencerede görünür; başarılı işlemden 10 saniye sonra
-günlük paneli otomatik temizlenir. Dosya ve klasör seçimi KDE'de yerel
-`kdialog` penceresiyle açılır. Linux'ta Tkinter yoksa:
+günlük paneli otomatik temizlenir. **Son Çıktıyı Aç** düğmesi, en son tamamlanmış
+çıktı PDF'ini açar (yarım kalmış dosyalar dikkate alınmaz). Dosya ve klasör seçimi
+KDE'de yerel `kdialog` penceresiyle açılır. Linux'ta Tkinter yoksa:
 `sudo dnf install python3-tkinter` (Fedora) veya `sudo apt install python3-tk`
 (Debian/Ubuntu).
 
