@@ -104,7 +104,7 @@ def _native_pick(kind: str, initial: Path) -> tuple[str | None, bool]:
                 "Kaynak PDF seç",
                 "--getopenfilename",
                 str(initial),
-                "PDF dosyaları (*.pdf)",
+                "PDF dosyaları (*.pdf *.PDF)",
             ]
         else:
             cmd = [
@@ -129,7 +129,7 @@ def _native_pick(kind: str, initial: Path) -> tuple[str | None, bool]:
                 "zenity",
                 "--file-selection",
                 "--title=Kaynak PDF seç",
-                "--file-filter=PDF dosyaları | *.pdf",
+                "--file-filter=PDF dosyaları | *.pdf *.PDF",
             ]
         else:
             cmd = ["zenity", "--file-selection", "--directory", "--title=Kayıt klasörü seç"]
@@ -154,7 +154,7 @@ def pick_pdf_file(initial: Path, parent: tk.Misc) -> str | None:
         parent=parent,
         title="Kaynak PDF seç",
         initialdir=str(initial),
-        filetypes=[("PDF dosyaları", "*.pdf")],
+        filetypes=[("PDF dosyaları", "*.pdf *.PDF")],
     )
     return selected or None
 
