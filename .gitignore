@@ -11,6 +11,9 @@ input/*
 output/*
 !output/.gitkeep
 
+# Yerel arac binaries (tesseract vb.)
+.tools/
+
 # Checkpoint / cache
 *.checkpoint.json
 *.cache.json

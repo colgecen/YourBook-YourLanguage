@@ -207,8 +207,11 @@ def run(args: argparse.Namespace) -> Path:
 
     start = args.start_page
     end = args.end_page
-    images = ocr.pdf_to_images(input_path, start_page=start, end_page=end)
-    page_numbers = list(range(start, start + len(images)))
+    total_pages = ocr.pdf_page_count(input_path)
+    last_page = total_pages if end is None else min(max(start, end), total_pages)
+    images = ocr.iter_pdf_images(input_path, start_page=start, end_page=last_page)
+    page_numbers = range(start, last_page + 1)
+    total_to_process = max(0, last_page - start + 1)
 
     def _flush() -> None:
         builder.save(output_path)
@@ -226,20 +229,20 @@ def run(args: argparse.Namespace) -> Path:
 
     try:
         for page_no, image in tqdm(
-            list(zip(page_numbers, images)), desc="Sayfalar", unit="sayfa"
+            zip(page_numbers, images),
+            total=total_to_process,
+            desc="Sayfalar",
+            unit="sayfa",
         ):
             if page_no < next_page or page_no in done_pages:
                 continue
 
             try:
-                blocks = ocr.extract_blocks(image)
+                raw_text, blocks = ocr.extract_text_and_blocks(image)
                 bboxes = [b.bbox for b in blocks]
                 cleaned_img = cleaner.clean(image, bboxes)
 
-                raw_text = ocr.extract_page_text(image)
-                paragraphs = [p.strip() for p in raw_text.split("\n") if p.strip()]
-                tr_paragraphs = translator.translate_paragraphs(paragraphs)
-                tr_text = "\n\n".join(tr_paragraphs)
+                tr_text = translator.translate_text(raw_text)
 
                 w, h = image.size
                 # Piksel -> pt (1 in = 72 pt, PDF varsayilan 72 DPI koordinat)

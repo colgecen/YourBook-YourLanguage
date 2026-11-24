@@ -82,6 +82,7 @@ class PDFBuilder:
         else:
             self.doc = fitz.open()
         self._fonts_registered = False
+        self._dirty = False
 
     def _active_font(self) -> str:
         """Garamond mevcutsa onu, yoksa helv doner."""
@@ -171,6 +172,7 @@ class PDFBuilder:
                 align=fitz.TEXT_ALIGN_JUSTIFY,
                 color=(0, 0, 0),
             )
+        self._dirty = True
 
     def save(self, output_path: str | Path) -> Path:
         """PDF'i diske kaydeder (incremental checkpoint icin tekrar cagrilabilir).
@@ -183,8 +185,23 @@ class PDFBuilder:
         """
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        # garbage=4, deflate: kismi kayitlarda sismeyi onler.
-        self.doc.save(str(out), garbage=4, deflate=True)
+        if len(self.doc) == 0:
+            raise RuntimeError(
+                "Cikti PDF'e hic sayfa yazilamadi (tum sayfalar atlandi). "
+                "Hata mesajlari icin yukaridaki ciktiyi kontrol edin."
+            )
+        same_file = bool(self.doc.name) and Path(self.doc.name).resolve() == out.resolve()
+        if same_file:
+            # Acik dosyanin uzerine normal kayit yapilamaz; sadece artimli kayit.
+            if self._dirty:
+                self.doc.save(
+                    str(out), incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP
+                )
+                self._dirty = False
+        else:
+            # garbage=4, deflate: kismi kayitlarda sismeyi onler.
+            self.doc.save(str(out), garbage=4, deflate=True)
+            self._dirty = False
         return out
 
     def close(self) -> None:
