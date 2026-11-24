@@ -209,7 +209,8 @@ linux_source() {
 }
 
 linux_targz() {
-  local arch="$1" name="$APP-$VERSION-$arch" dir out
+  local arch="$1" name dir out
+  name="$APP-$VERSION-$arch"
   dir="$STAGE/$name"
   rm -rf "$dir"
   mkdir -p "$dir" "$DIST"
@@ -220,7 +221,8 @@ linux_targz() {
 }
 
 linux_rpm() {
-  local arch="$1" top="$STAGE/rpm-$arch" out
+  local arch="$1" top out
+  top="$STAGE/rpm-$arch"
   command -v rpmbuild >/dev/null 2>&1 || die "rpmbuild not found (sudo dnf install rpm-build)."
   rm -rf "$top"
   mkdir -p "$top"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} "$DIST"
@@ -293,7 +295,8 @@ fetch() {
 }
 
 linux_appimage() {
-  local arch="$1" appdir="$STAGE/$APP-$arch.AppDir" out
+  local arch="$1" appdir out
+  appdir="$STAGE/$APP-$arch.AppDir"
   local tool runtime
   mkdir -p "$CACHE"
   if command -v appimagetool >/dev/null 2>&1; then
