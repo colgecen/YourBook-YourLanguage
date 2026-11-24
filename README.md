@@ -4,10 +4,11 @@ Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sa
 
 ## ✨ Özellikler
 - **%100 Ücretsiz & Yerel OCR:** Google Tesseract C++ motoru ile kopyalanamayan resim yazıları okuma.
-- **Hızlı Çeviri:** `deep-translator` üzerinden Google Translate entegrasyonu + SQLite cache.
-- **Garamond Auto-Fit Dizgi:** Türkçe metin uzamalarına karşı font boyutunu dinamik küçülterek sayfadan taşımayı önleme.
+- **Hızlı Çeviri:** `deep-translator` üzerinden Google Translate entegrasyonu + SQLite cache; Google engelliyse otomatik alternatif uç nokta.
+- **Garamond Auto-Fit Dizgi:** Türkçe metin uzamalarına karşı font boyutunu dinamik küçülterek sayfadan taşmayı önleme.
 - **Görsel Temizleme (Inpainting):** OpenCV ile arka plan dokusunu koruyarak eski İngilizce yazıları silme.
 - **Kesinti Koruması (Checkpoint):** Dev kitaplarda işlem yarıda kalırsa kaldığı sayfadan devam edebilme.
+- **Grafik Arayüz:** Tkinter tabanlı masaüstü arayüzü; dosya seçimi, sayfa aralığı, canlı ilerleme ve günlük.
 
 ## 🛠️ Kurulum
 
@@ -22,6 +23,19 @@ Taranmış veya görsel (kopyalanamayan) 500-1000 sayfalık kitap PDF'lerini, sa
    ```
 
 ## 🚀 Kullanım
+
+### Grafik arayüz (önerilen)
+
+```bash
+python gui.py
+```
+
+Arayüzden kaynak PDF'i seçin, çıktı konumunu belirleyin, sayfa aralığını ve DPI'ı
+ayarlayıp **Çeviriyi Başlat** düğmesine basın. İlerleme ve hatalar aynı pencerede
+görünür. Linux'ta Tkinter yoksa: `sudo dnf install python3-tkinter`
+(Fedora) veya `sudo apt install python3-tk` (Debian/Ubuntu).
+
+### Komut satırı
 
 ```bash
 python main.py --input input/kitap.pdf --output output/kitap_tr.pdf
@@ -39,6 +53,7 @@ Checkpoint dosyası otomatik olarak oluşturulur; işlem yarıda kalırsa aynı 
 ```
 book-translator-pdf/
 ├── main.py                     # CLI giriş noktası ve pipeline orkestrasyonu
+├── gui.py                      # Tkinter masaüstü arayüzü
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
