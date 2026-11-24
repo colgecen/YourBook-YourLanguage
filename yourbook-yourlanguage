@@ -85,17 +85,20 @@ WRAPPER_MARK="# yourbook-yourlanguage-wrapper"
 DESKTOP_MARK="# yourbook-yourlanguage-desktop"
 
 prepare_icon() {
-  local src="$ROOT/$ICON" dest="$1" im="" w r corner
+  local src="$ROOT/$ICON" dest="$1" im="" im_id="" w r opaque
   [ -f "$src" ] || return 1
-  if command -v magick >/dev/null 2>&1; then im="magick"
-  elif command -v convert >/dev/null 2>&1; then im="convert"; fi
+  if command -v magick >/dev/null 2>&1; then
+    im="magick"; im_id="magick identify"
+  elif command -v convert >/dev/null 2>&1; then
+    im="convert"; im_id="identify"
+  fi
   if [ -z "$im" ]; then
     echo "NOTE: ImageMagick not found, icon copied without rounding."
     cp "$src" "$dest"; return 0
   fi
-  w="$($im "$src" -format %w info:)"
+  w="$($im_id -format '%w' "$src")"
   r=$(( w * ICON_RADIUS_PCT / 100 ))
-  opaque="$($im "$src" -format '%[opaque]' info: 2>/dev/null || echo True)"
+  opaque="$($im_id -format '%[opaque]' "$src" 2>/dev/null || echo True)"
   if [ "$opaque" != "True" ]; then
     # Icon already has transparent (rounded) corners; keep it unchanged.
     cp "$src" "$dest"
